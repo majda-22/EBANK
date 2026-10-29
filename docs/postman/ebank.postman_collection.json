@@ -1,0 +1,1112 @@
+{
+  "info": {
+    "_postman_id": "d016a7a3-cb07-46b3-924e-e7e1a7b61979",
+    "name": "E-Bank Microservices via Gateway",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "description": "Run with ebank-local.postman_environment.json and the stack up. Every request uses {{baseUrl}} (localhost:8080). Run folders in order. Customer CRUD cleans up its own temporary customer. Each full iteration creates one account on an existing customer; it persists until the banking H2 database restarts. Runtime IDs are captured automatically in collection variables. Resilience probes default to healthy expectations; read their folder instructions for outage/recovery modes."
+  },
+  "item": [
+    {
+      "name": "Customers CRUD",
+      "description": "Creates, verifies, updates and deletes only its own temporary customer. Leaves existing customers intact.",
+      "item": [
+        {
+          "name": "List customers",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/customers",
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "['testCustomerId', 'testEmail', 'existingAccountId', 'accountCustomerId', 'createdAccountId'].forEach(key => pm.collectionVariables.unset(key));",
+                  "pm.collectionVariables.set('testEmail', 'postman.' + pm.variables.replaceIn('{{$guid}}') + '@example.com');"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.test('JSON response', () => pm.response.to.be.json);",
+                  "function checkCustomer(customer) {",
+                  "    pm.expect(customer).to.be.an('object');",
+                  "    pm.expect(customer).to.include.all.keys('id', 'firstName', 'lastName', 'email');",
+                  "    pm.expect(customer.id).to.be.a('number').above(0);",
+                  "    ['firstName', 'lastName', 'email'].forEach(key => pm.expect(customer[key]).to.be.a('string').and.not.empty);",
+                  "}",
+                  "pm.test('Customers are present and have the expected fields', () => {",
+                  "    const customers = pm.response.json();",
+                  "    pm.expect(customers).to.be.an('array').and.not.empty;",
+                  "    customers.forEach(checkCustomer);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Create temporary customer",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/customers",
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"firstName\": \"Postman\",\n  \"lastName\": \"Runner\",\n  \"email\": \"{{testEmail}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 201', () => pm.response.to.have.status(201));",
+                  "pm.test('JSON response', () => pm.response.to.be.json);",
+                  "function checkCustomer(customer) {",
+                  "    pm.expect(customer).to.be.an('object');",
+                  "    pm.expect(customer).to.include.all.keys('id', 'firstName', 'lastName', 'email');",
+                  "    pm.expect(customer.id).to.be.a('number').above(0);",
+                  "    ['firstName', 'lastName', 'email'].forEach(key => pm.expect(customer[key]).to.be.a('string').and.not.empty);",
+                  "}",
+                  "pm.test('Created customer matches input and has a Location header', () => {",
+                  "    const customer = pm.response.json();",
+                  "    checkCustomer(customer);",
+                  "    pm.expect(customer.firstName).to.eql('Postman');",
+                  "    pm.expect(customer.lastName).to.eql('Runner');",
+                  "    pm.expect(customer.email).to.eql(pm.collectionVariables.get('testEmail'));",
+                  "    pm.expect(pm.response.headers.get('Location')).to.include('/api/customers/' + customer.id);",
+                  "    pm.collectionVariables.set('testCustomerId', customer.id);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Get temporary customer",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/customers/{{testCustomerId}}",
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.test('JSON response', () => pm.response.to.be.json);",
+                  "function checkCustomer(customer) {",
+                  "    pm.expect(customer).to.be.an('object');",
+                  "    pm.expect(customer).to.include.all.keys('id', 'firstName', 'lastName', 'email');",
+                  "    pm.expect(customer.id).to.be.a('number').above(0);",
+                  "    ['firstName', 'lastName', 'email'].forEach(key => pm.expect(customer[key]).to.be.a('string').and.not.empty);",
+                  "}",
+                  "pm.test('Read returns the created customer', () => {",
+                  "    const customer = pm.response.json();",
+                  "    checkCustomer(customer);",
+                  "    pm.expect(customer.id).to.eql(Number(pm.collectionVariables.get('testCustomerId')));",
+                  "    pm.expect(customer.email).to.eql(pm.collectionVariables.get('testEmail'));",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Update temporary customer",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/customers/{{testCustomerId}}",
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"firstName\": \"Updated\",\n  \"lastName\": \"Runner\",\n  \"email\": \"{{testEmail}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.test('JSON response', () => pm.response.to.be.json);",
+                  "function checkCustomer(customer) {",
+                  "    pm.expect(customer).to.be.an('object');",
+                  "    pm.expect(customer).to.include.all.keys('id', 'firstName', 'lastName', 'email');",
+                  "    pm.expect(customer.id).to.be.a('number').above(0);",
+                  "    ['firstName', 'lastName', 'email'].forEach(key => pm.expect(customer[key]).to.be.a('string').and.not.empty);",
+                  "}",
+                  "pm.test('Update preserves ID and returns new fields', () => {",
+                  "    const customer = pm.response.json();",
+                  "    checkCustomer(customer);",
+                  "    pm.expect(customer.id).to.eql(Number(pm.collectionVariables.get('testCustomerId')));",
+                  "    pm.expect(customer.firstName).to.eql('Updated');",
+                  "    pm.expect(customer.lastName).to.eql('Runner');",
+                  "    pm.expect(customer.email).to.eql(pm.collectionVariables.get('testEmail'));",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Reject invalid email",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/customers",
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"firstName\": \"Postman\",\n  \"lastName\": \"Runner\",\n  \"email\": \"invalid-email\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 400', () => pm.response.to.have.status(400));",
+                  "pm.test('JSON response', () => pm.response.to.be.json);",
+                  "",
+                  "pm.test('Validation returns a clean JSON error', () => {",
+                  "    const error = pm.response.json();",
+                  "    pm.expect(error.status).to.eql(400);",
+                  "    pm.expect(error.fieldErrors).to.have.property('email');",
+                  "    pm.expect(error).not.to.have.property('trace');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Delete temporary customer",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/customers/{{testCustomerId}}",
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 204', () => pm.response.to.have.status(204));",
+                  "pm.test('Delete has an empty body', () => pm.expect(pm.response.text()).to.eql(''));"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Deleted customer returns 404",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/customers/{{testCustomerId}}",
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 404', () => pm.response.to.have.status(404));",
+                  "pm.test('JSON response', () => pm.response.to.be.json);",
+                  "",
+                  "pm.test('Deleted customer has a clean not-found response', () => {",
+                  "    const error = pm.response.json();",
+                  "    pm.expect(error).to.include.all.keys('timestamp', 'status', 'error', 'message', 'path', 'fieldErrors');",
+                  "    pm.expect(error.status).to.eql(404);",
+                  "    pm.expect(error.message).to.include(String(pm.collectionVariables.get('testCustomerId')));",
+                  "    pm.expect(error.path).to.eql('/api/customers/' + pm.collectionVariables.get('testCustomerId'));",
+                  "    pm.expect(error).not.to.have.property('trace');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Accounts",
+      "description": "Uses the first existing account and its customer. Requires seeding to have succeeded. Creates one additional account per iteration.",
+      "item": [
+        {
+          "name": "List accounts and capture an existing account",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/accounts",
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.test('JSON response', () => pm.response.to.be.json);",
+                  "function checkCustomer(customer) {",
+                  "    pm.expect(customer).to.be.an('object');",
+                  "    pm.expect(customer).to.include.all.keys('id', 'firstName', 'lastName', 'email');",
+                  "    pm.expect(customer.id).to.be.a('number').above(0);",
+                  "    ['firstName', 'lastName', 'email'].forEach(key => pm.expect(customer[key]).to.be.a('string').and.not.empty);",
+                  "}",
+                  "function checkAccount(account) {",
+                  "    pm.expect(account).to.include.all.keys('id', 'balance', 'createdAt', 'type', 'customerId', 'customer');",
+                  "    pm.expect(account.id).to.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);",
+                  "    pm.expect(account.balance).to.be.a('number').and.at.least(0);",
+                  "    pm.expect(Number.isNaN(Date.parse(account.createdAt))).to.eql(false);",
+                  "    pm.expect(['CURRENT_ACCOUNT', 'SAVING_ACCOUNT']).to.include(account.type);",
+                  "    checkCustomer(account.customer);",
+                  "    pm.expect(account.customer.id).to.eql(account.customerId);",
+                  "}",
+                  "pm.test('Accounts have customer details and server-generated fields', () => {",
+                  "    const accounts = pm.response.json();",
+                  "    pm.expect(accounts).to.be.an('array').and.not.empty;",
+                  "    accounts.forEach(checkAccount);",
+                  "    pm.collectionVariables.set('existingAccountId', accounts[0].id);",
+                  "    pm.collectionVariables.set('accountCustomerId', accounts[0].customerId);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Get account with customer",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/accounts/{{existingAccountId}}",
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.test('JSON response', () => pm.response.to.be.json);",
+                  "function checkCustomer(customer) {",
+                  "    pm.expect(customer).to.be.an('object');",
+                  "    pm.expect(customer).to.include.all.keys('id', 'firstName', 'lastName', 'email');",
+                  "    pm.expect(customer.id).to.be.a('number').above(0);",
+                  "    ['firstName', 'lastName', 'email'].forEach(key => pm.expect(customer[key]).to.be.a('string').and.not.empty);",
+                  "}",
+                  "function checkAccount(account) {",
+                  "    pm.expect(account).to.include.all.keys('id', 'balance', 'createdAt', 'type', 'customerId', 'customer');",
+                  "    pm.expect(account.id).to.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);",
+                  "    pm.expect(account.balance).to.be.a('number').and.at.least(0);",
+                  "    pm.expect(Number.isNaN(Date.parse(account.createdAt))).to.eql(false);",
+                  "    pm.expect(['CURRENT_ACCOUNT', 'SAVING_ACCOUNT']).to.include(account.type);",
+                  "    checkCustomer(account.customer);",
+                  "    pm.expect(account.customer.id).to.eql(account.customerId);",
+                  "}",
+                  "pm.test('Account contains the matching real customer', () => {",
+                  "    const account = pm.response.json();",
+                  "    checkAccount(account);",
+                  "    pm.expect(account.id).to.eql(pm.collectionVariables.get('existingAccountId'));",
+                  "    pm.expect(account.customer.firstName).not.to.eql('Not available');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "List accounts by customer",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/accounts/customer/{{accountCustomerId}}",
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.test('JSON response', () => pm.response.to.be.json);",
+                  "function checkCustomer(customer) {",
+                  "    pm.expect(customer).to.be.an('object');",
+                  "    pm.expect(customer).to.include.all.keys('id', 'firstName', 'lastName', 'email');",
+                  "    pm.expect(customer.id).to.be.a('number').above(0);",
+                  "    ['firstName', 'lastName', 'email'].forEach(key => pm.expect(customer[key]).to.be.a('string').and.not.empty);",
+                  "}",
+                  "function checkAccount(account) {",
+                  "    pm.expect(account).to.include.all.keys('id', 'balance', 'createdAt', 'type', 'customerId', 'customer');",
+                  "    pm.expect(account.id).to.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);",
+                  "    pm.expect(account.balance).to.be.a('number').and.at.least(0);",
+                  "    pm.expect(Number.isNaN(Date.parse(account.createdAt))).to.eql(false);",
+                  "    pm.expect(['CURRENT_ACCOUNT', 'SAVING_ACCOUNT']).to.include(account.type);",
+                  "    checkCustomer(account.customer);",
+                  "    pm.expect(account.customer.id).to.eql(account.customerId);",
+                  "}",
+                  "pm.test('All accounts belong to the requested customer', () => {",
+                  "    const accounts = pm.response.json();",
+                  "    pm.expect(accounts).to.be.an('array').and.not.empty;",
+                  "    accounts.forEach(account => {",
+                  "        checkAccount(account);",
+                  "        pm.expect(account.customerId).to.eql(Number(pm.collectionVariables.get('accountCustomerId')));",
+                  "    });",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Create account for existing customer",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/accounts",
+            "description": "Creates one persistent H2 account per collection iteration. It belongs to an existing customer, which is never deleted. Accounts have no DELETE endpoint; restart ebank-service to reset its in-memory database.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"balance\": 125.5,\n  \"type\": \"CURRENT_ACCOUNT\",\n  \"customerId\": \"{{accountCustomerId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 201', () => pm.response.to.have.status(201));",
+                  "pm.test('JSON response', () => pm.response.to.be.json);",
+                  "function checkCustomer(customer) {",
+                  "    pm.expect(customer).to.be.an('object');",
+                  "    pm.expect(customer).to.include.all.keys('id', 'firstName', 'lastName', 'email');",
+                  "    pm.expect(customer.id).to.be.a('number').above(0);",
+                  "    ['firstName', 'lastName', 'email'].forEach(key => pm.expect(customer[key]).to.be.a('string').and.not.empty);",
+                  "}",
+                  "function checkAccount(account) {",
+                  "    pm.expect(account).to.include.all.keys('id', 'balance', 'createdAt', 'type', 'customerId', 'customer');",
+                  "    pm.expect(account.id).to.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);",
+                  "    pm.expect(account.balance).to.be.a('number').and.at.least(0);",
+                  "    pm.expect(Number.isNaN(Date.parse(account.createdAt))).to.eql(false);",
+                  "    pm.expect(['CURRENT_ACCOUNT', 'SAVING_ACCOUNT']).to.include(account.type);",
+                  "    checkCustomer(account.customer);",
+                  "    pm.expect(account.customer.id).to.eql(account.customerId);",
+                  "}",
+                  "pm.test('Created account has customer details and a Location header', () => {",
+                  "    const account = pm.response.json();",
+                  "    checkAccount(account);",
+                  "    pm.expect(account.balance).to.eql(125.5);",
+                  "    pm.expect(account.type).to.eql('CURRENT_ACCOUNT');",
+                  "    pm.expect(account.customerId).to.eql(Number(pm.collectionVariables.get('accountCustomerId')));",
+                  "    pm.expect(account.customer.firstName).not.to.eql('Not available');",
+                  "    pm.expect(pm.response.headers.get('Location')).to.include('/api/accounts/' + account.id);",
+                  "    pm.collectionVariables.set('createdAccountId', account.id);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Get newly created account",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/accounts/{{createdAccountId}}",
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.test('JSON response', () => pm.response.to.be.json);",
+                  "function checkCustomer(customer) {",
+                  "    pm.expect(customer).to.be.an('object');",
+                  "    pm.expect(customer).to.include.all.keys('id', 'firstName', 'lastName', 'email');",
+                  "    pm.expect(customer.id).to.be.a('number').above(0);",
+                  "    ['firstName', 'lastName', 'email'].forEach(key => pm.expect(customer[key]).to.be.a('string').and.not.empty);",
+                  "}",
+                  "function checkAccount(account) {",
+                  "    pm.expect(account).to.include.all.keys('id', 'balance', 'createdAt', 'type', 'customerId', 'customer');",
+                  "    pm.expect(account.id).to.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);",
+                  "    pm.expect(account.balance).to.be.a('number').and.at.least(0);",
+                  "    pm.expect(Number.isNaN(Date.parse(account.createdAt))).to.eql(false);",
+                  "    pm.expect(['CURRENT_ACCOUNT', 'SAVING_ACCOUNT']).to.include(account.type);",
+                  "    checkCustomer(account.customer);",
+                  "    pm.expect(account.customer.id).to.eql(account.customerId);",
+                  "}",
+                  "pm.test('Created account can be read back', () => {",
+                  "    const account = pm.response.json();",
+                  "    checkAccount(account);",
+                  "    pm.expect(account.id).to.eql(pm.collectionVariables.get('createdAccountId'));",
+                  "    pm.expect(account.balance).to.eql(125.5);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Reject account for deleted customer",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/accounts",
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"balance\": 100,\n  \"type\": \"CURRENT_ACCOUNT\",\n  \"customerId\": \"{{testCustomerId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 404', () => pm.response.to.have.status(404));",
+                  "pm.test('JSON response', () => pm.response.to.be.json);",
+                  "",
+                  "pm.test('Unknown customer is rejected', () => {",
+                  "    const error = pm.response.json();",
+                  "    pm.expect(error.status).to.eql(404);",
+                  "    pm.expect(error.message).to.include('Customer with id ' + pm.collectionVariables.get('testCustomerId'));",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Reject negative balance",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/accounts",
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"balance\": -1,\n  \"type\": \"CURRENT_ACCOUNT\",\n  \"customerId\": \"{{accountCustomerId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 400', () => pm.response.to.have.status(400));",
+                  "pm.test('JSON response', () => pm.response.to.be.json);",
+                  "",
+                  "pm.test('Negative balance produces a validation error', () => {",
+                  "    const error = pm.response.json();",
+                  "    pm.expect(error.status).to.eql(400);",
+                  "    pm.expect(error.fieldErrors).to.have.property('balance');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "resilience",
+      "description": "Default resilienceMode=healthy: every request expects real customer fields, so a full run is green with the stack up.\n\nFor an outage drill, first run the collection normally to capture existingAccountId. Keep ebank-service and the gateway running. Stop customer-service, set resilienceMode=outage, and run only \"Open circuit (five probes)\". Each response must be HTTP 200 with matching customer ID and \"Not available\" for firstName, lastName, and email. Five failed lookups open CustomerRestClientfindCustomerByIdLong.\n\nWait at least 10 seconds without account requests for HALF_OPEN. Restart customer-service and wait for its API and Eureka registration. Set resilienceMode=recovery and run only \"Recovery (two probes)\". Two successful real-customer lookups close the circuit. If Eureka has not refreshed, wait another open interval and repeat the recovery probes.\n\nObserve states/events directly at http://localhost:8082/actuator/circuitbreakers and /actuator/circuitbreakerevents; these are instructions, not collection requests, because all collection traffic goes through the gateway. The gateway intentionally does not route backend Actuator or MCP endpoints. See ../resilience-test.md for the full drill. Reset resilienceMode=healthy before running the complete collection again. An HTTP runner cannot stop/restart your local Java services automatically.",
+      "item": [
+        {
+          "name": "Open circuit (five probes)",
+          "description": "Healthy by default. For an outage drill, stop customer-service and set resilienceMode=outage before running this folder alone.",
+          "item": [
+            {
+              "name": "Account probe 1",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json"
+                  }
+                ],
+                "url": "{{baseUrl}}/api/accounts/{{existingAccountId}}",
+                "description": ""
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                      "pm.test('JSON response', () => pm.response.to.be.json);",
+                      "function checkCustomer(customer) {",
+                      "    pm.expect(customer).to.be.an('object');",
+                      "    pm.expect(customer).to.include.all.keys('id', 'firstName', 'lastName', 'email');",
+                      "    pm.expect(customer.id).to.be.a('number').above(0);",
+                      "    ['firstName', 'lastName', 'email'].forEach(key => pm.expect(customer[key]).to.be.a('string').and.not.empty);",
+                      "}",
+                      "function checkAccount(account) {",
+                      "    pm.expect(account).to.include.all.keys('id', 'balance', 'createdAt', 'type', 'customerId', 'customer');",
+                      "    pm.expect(account.id).to.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);",
+                      "    pm.expect(account.balance).to.be.a('number').and.at.least(0);",
+                      "    pm.expect(Number.isNaN(Date.parse(account.createdAt))).to.eql(false);",
+                      "    pm.expect(['CURRENT_ACCOUNT', 'SAVING_ACCOUNT']).to.include(account.type);",
+                      "    checkCustomer(account.customer);",
+                      "    pm.expect(account.customer.id).to.eql(account.customerId);",
+                      "}",
+                      "pm.test('Account remains readable and preserves its identity', () => {",
+                      "    const account = pm.response.json();",
+                      "    checkAccount(account);",
+                      "    pm.expect(account.id).to.eql(pm.collectionVariables.get('existingAccountId'));",
+                      "});",
+                      "pm.test('Customer data matches the selected resilience mode', () => {",
+                      "    const mode = pm.environment.get('resilienceMode') || 'healthy';",
+                      "    pm.expect(['healthy', 'outage', 'recovery']).to.include(mode);",
+                      "    const customer = pm.response.json().customer;",
+                      "    ['firstName', 'lastName', 'email'].forEach(field => {",
+                      "        if (mode === 'outage') pm.expect(customer[field]).to.eql('Not available');",
+                      "        else pm.expect(customer[field]).not.to.eql('Not available');",
+                      "    });",
+                      "});"
+                    ]
+                  }
+                }
+              ],
+              "response": []
+            },
+            {
+              "name": "Account probe 2",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json"
+                  }
+                ],
+                "url": "{{baseUrl}}/api/accounts/{{existingAccountId}}",
+                "description": ""
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                      "pm.test('JSON response', () => pm.response.to.be.json);",
+                      "function checkCustomer(customer) {",
+                      "    pm.expect(customer).to.be.an('object');",
+                      "    pm.expect(customer).to.include.all.keys('id', 'firstName', 'lastName', 'email');",
+                      "    pm.expect(customer.id).to.be.a('number').above(0);",
+                      "    ['firstName', 'lastName', 'email'].forEach(key => pm.expect(customer[key]).to.be.a('string').and.not.empty);",
+                      "}",
+                      "function checkAccount(account) {",
+                      "    pm.expect(account).to.include.all.keys('id', 'balance', 'createdAt', 'type', 'customerId', 'customer');",
+                      "    pm.expect(account.id).to.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);",
+                      "    pm.expect(account.balance).to.be.a('number').and.at.least(0);",
+                      "    pm.expect(Number.isNaN(Date.parse(account.createdAt))).to.eql(false);",
+                      "    pm.expect(['CURRENT_ACCOUNT', 'SAVING_ACCOUNT']).to.include(account.type);",
+                      "    checkCustomer(account.customer);",
+                      "    pm.expect(account.customer.id).to.eql(account.customerId);",
+                      "}",
+                      "pm.test('Account remains readable and preserves its identity', () => {",
+                      "    const account = pm.response.json();",
+                      "    checkAccount(account);",
+                      "    pm.expect(account.id).to.eql(pm.collectionVariables.get('existingAccountId'));",
+                      "});",
+                      "pm.test('Customer data matches the selected resilience mode', () => {",
+                      "    const mode = pm.environment.get('resilienceMode') || 'healthy';",
+                      "    pm.expect(['healthy', 'outage', 'recovery']).to.include(mode);",
+                      "    const customer = pm.response.json().customer;",
+                      "    ['firstName', 'lastName', 'email'].forEach(field => {",
+                      "        if (mode === 'outage') pm.expect(customer[field]).to.eql('Not available');",
+                      "        else pm.expect(customer[field]).not.to.eql('Not available');",
+                      "    });",
+                      "});"
+                    ]
+                  }
+                }
+              ],
+              "response": []
+            },
+            {
+              "name": "Account probe 3",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json"
+                  }
+                ],
+                "url": "{{baseUrl}}/api/accounts/{{existingAccountId}}",
+                "description": ""
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                      "pm.test('JSON response', () => pm.response.to.be.json);",
+                      "function checkCustomer(customer) {",
+                      "    pm.expect(customer).to.be.an('object');",
+                      "    pm.expect(customer).to.include.all.keys('id', 'firstName', 'lastName', 'email');",
+                      "    pm.expect(customer.id).to.be.a('number').above(0);",
+                      "    ['firstName', 'lastName', 'email'].forEach(key => pm.expect(customer[key]).to.be.a('string').and.not.empty);",
+                      "}",
+                      "function checkAccount(account) {",
+                      "    pm.expect(account).to.include.all.keys('id', 'balance', 'createdAt', 'type', 'customerId', 'customer');",
+                      "    pm.expect(account.id).to.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);",
+                      "    pm.expect(account.balance).to.be.a('number').and.at.least(0);",
+                      "    pm.expect(Number.isNaN(Date.parse(account.createdAt))).to.eql(false);",
+                      "    pm.expect(['CURRENT_ACCOUNT', 'SAVING_ACCOUNT']).to.include(account.type);",
+                      "    checkCustomer(account.customer);",
+                      "    pm.expect(account.customer.id).to.eql(account.customerId);",
+                      "}",
+                      "pm.test('Account remains readable and preserves its identity', () => {",
+                      "    const account = pm.response.json();",
+                      "    checkAccount(account);",
+                      "    pm.expect(account.id).to.eql(pm.collectionVariables.get('existingAccountId'));",
+                      "});",
+                      "pm.test('Customer data matches the selected resilience mode', () => {",
+                      "    const mode = pm.environment.get('resilienceMode') || 'healthy';",
+                      "    pm.expect(['healthy', 'outage', 'recovery']).to.include(mode);",
+                      "    const customer = pm.response.json().customer;",
+                      "    ['firstName', 'lastName', 'email'].forEach(field => {",
+                      "        if (mode === 'outage') pm.expect(customer[field]).to.eql('Not available');",
+                      "        else pm.expect(customer[field]).not.to.eql('Not available');",
+                      "    });",
+                      "});"
+                    ]
+                  }
+                }
+              ],
+              "response": []
+            },
+            {
+              "name": "Account probe 4",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json"
+                  }
+                ],
+                "url": "{{baseUrl}}/api/accounts/{{existingAccountId}}",
+                "description": ""
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                      "pm.test('JSON response', () => pm.response.to.be.json);",
+                      "function checkCustomer(customer) {",
+                      "    pm.expect(customer).to.be.an('object');",
+                      "    pm.expect(customer).to.include.all.keys('id', 'firstName', 'lastName', 'email');",
+                      "    pm.expect(customer.id).to.be.a('number').above(0);",
+                      "    ['firstName', 'lastName', 'email'].forEach(key => pm.expect(customer[key]).to.be.a('string').and.not.empty);",
+                      "}",
+                      "function checkAccount(account) {",
+                      "    pm.expect(account).to.include.all.keys('id', 'balance', 'createdAt', 'type', 'customerId', 'customer');",
+                      "    pm.expect(account.id).to.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);",
+                      "    pm.expect(account.balance).to.be.a('number').and.at.least(0);",
+                      "    pm.expect(Number.isNaN(Date.parse(account.createdAt))).to.eql(false);",
+                      "    pm.expect(['CURRENT_ACCOUNT', 'SAVING_ACCOUNT']).to.include(account.type);",
+                      "    checkCustomer(account.customer);",
+                      "    pm.expect(account.customer.id).to.eql(account.customerId);",
+                      "}",
+                      "pm.test('Account remains readable and preserves its identity', () => {",
+                      "    const account = pm.response.json();",
+                      "    checkAccount(account);",
+                      "    pm.expect(account.id).to.eql(pm.collectionVariables.get('existingAccountId'));",
+                      "});",
+                      "pm.test('Customer data matches the selected resilience mode', () => {",
+                      "    const mode = pm.environment.get('resilienceMode') || 'healthy';",
+                      "    pm.expect(['healthy', 'outage', 'recovery']).to.include(mode);",
+                      "    const customer = pm.response.json().customer;",
+                      "    ['firstName', 'lastName', 'email'].forEach(field => {",
+                      "        if (mode === 'outage') pm.expect(customer[field]).to.eql('Not available');",
+                      "        else pm.expect(customer[field]).not.to.eql('Not available');",
+                      "    });",
+                      "});"
+                    ]
+                  }
+                }
+              ],
+              "response": []
+            },
+            {
+              "name": "Account probe 5",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json"
+                  }
+                ],
+                "url": "{{baseUrl}}/api/accounts/{{existingAccountId}}",
+                "description": ""
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                      "pm.test('JSON response', () => pm.response.to.be.json);",
+                      "function checkCustomer(customer) {",
+                      "    pm.expect(customer).to.be.an('object');",
+                      "    pm.expect(customer).to.include.all.keys('id', 'firstName', 'lastName', 'email');",
+                      "    pm.expect(customer.id).to.be.a('number').above(0);",
+                      "    ['firstName', 'lastName', 'email'].forEach(key => pm.expect(customer[key]).to.be.a('string').and.not.empty);",
+                      "}",
+                      "function checkAccount(account) {",
+                      "    pm.expect(account).to.include.all.keys('id', 'balance', 'createdAt', 'type', 'customerId', 'customer');",
+                      "    pm.expect(account.id).to.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);",
+                      "    pm.expect(account.balance).to.be.a('number').and.at.least(0);",
+                      "    pm.expect(Number.isNaN(Date.parse(account.createdAt))).to.eql(false);",
+                      "    pm.expect(['CURRENT_ACCOUNT', 'SAVING_ACCOUNT']).to.include(account.type);",
+                      "    checkCustomer(account.customer);",
+                      "    pm.expect(account.customer.id).to.eql(account.customerId);",
+                      "}",
+                      "pm.test('Account remains readable and preserves its identity', () => {",
+                      "    const account = pm.response.json();",
+                      "    checkAccount(account);",
+                      "    pm.expect(account.id).to.eql(pm.collectionVariables.get('existingAccountId'));",
+                      "});",
+                      "pm.test('Customer data matches the selected resilience mode', () => {",
+                      "    const mode = pm.environment.get('resilienceMode') || 'healthy';",
+                      "    pm.expect(['healthy', 'outage', 'recovery']).to.include(mode);",
+                      "    const customer = pm.response.json().customer;",
+                      "    ['firstName', 'lastName', 'email'].forEach(field => {",
+                      "        if (mode === 'outage') pm.expect(customer[field]).to.eql('Not available');",
+                      "        else pm.expect(customer[field]).not.to.eql('Not available');",
+                      "    });",
+                      "});"
+                    ]
+                  }
+                }
+              ],
+              "response": []
+            }
+          ]
+        },
+        {
+          "name": "Recovery (two probes)",
+          "description": "Healthy by default. For recovery, restart customer-service, wait for readiness and HALF_OPEN, then set resilienceMode=recovery and run this folder alone.",
+          "item": [
+            {
+              "name": "Recovery probe 1",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json"
+                  }
+                ],
+                "url": "{{baseUrl}}/api/accounts/{{existingAccountId}}",
+                "description": ""
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                      "pm.test('JSON response', () => pm.response.to.be.json);",
+                      "function checkCustomer(customer) {",
+                      "    pm.expect(customer).to.be.an('object');",
+                      "    pm.expect(customer).to.include.all.keys('id', 'firstName', 'lastName', 'email');",
+                      "    pm.expect(customer.id).to.be.a('number').above(0);",
+                      "    ['firstName', 'lastName', 'email'].forEach(key => pm.expect(customer[key]).to.be.a('string').and.not.empty);",
+                      "}",
+                      "function checkAccount(account) {",
+                      "    pm.expect(account).to.include.all.keys('id', 'balance', 'createdAt', 'type', 'customerId', 'customer');",
+                      "    pm.expect(account.id).to.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);",
+                      "    pm.expect(account.balance).to.be.a('number').and.at.least(0);",
+                      "    pm.expect(Number.isNaN(Date.parse(account.createdAt))).to.eql(false);",
+                      "    pm.expect(['CURRENT_ACCOUNT', 'SAVING_ACCOUNT']).to.include(account.type);",
+                      "    checkCustomer(account.customer);",
+                      "    pm.expect(account.customer.id).to.eql(account.customerId);",
+                      "}",
+                      "pm.test('Account remains readable and preserves its identity', () => {",
+                      "    const account = pm.response.json();",
+                      "    checkAccount(account);",
+                      "    pm.expect(account.id).to.eql(pm.collectionVariables.get('existingAccountId'));",
+                      "});",
+                      "pm.test('Customer data matches the selected resilience mode', () => {",
+                      "    const mode = pm.environment.get('resilienceMode') || 'healthy';",
+                      "    pm.expect(['healthy', 'outage', 'recovery']).to.include(mode);",
+                      "    const customer = pm.response.json().customer;",
+                      "    ['firstName', 'lastName', 'email'].forEach(field => {",
+                      "        if (mode === 'outage') pm.expect(customer[field]).to.eql('Not available');",
+                      "        else pm.expect(customer[field]).not.to.eql('Not available');",
+                      "    });",
+                      "});"
+                    ]
+                  }
+                }
+              ],
+              "response": []
+            },
+            {
+              "name": "Recovery probe 2",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json"
+                  }
+                ],
+                "url": "{{baseUrl}}/api/accounts/{{existingAccountId}}",
+                "description": ""
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                      "pm.test('JSON response', () => pm.response.to.be.json);",
+                      "function checkCustomer(customer) {",
+                      "    pm.expect(customer).to.be.an('object');",
+                      "    pm.expect(customer).to.include.all.keys('id', 'firstName', 'lastName', 'email');",
+                      "    pm.expect(customer.id).to.be.a('number').above(0);",
+                      "    ['firstName', 'lastName', 'email'].forEach(key => pm.expect(customer[key]).to.be.a('string').and.not.empty);",
+                      "}",
+                      "function checkAccount(account) {",
+                      "    pm.expect(account).to.include.all.keys('id', 'balance', 'createdAt', 'type', 'customerId', 'customer');",
+                      "    pm.expect(account.id).to.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);",
+                      "    pm.expect(account.balance).to.be.a('number').and.at.least(0);",
+                      "    pm.expect(Number.isNaN(Date.parse(account.createdAt))).to.eql(false);",
+                      "    pm.expect(['CURRENT_ACCOUNT', 'SAVING_ACCOUNT']).to.include(account.type);",
+                      "    checkCustomer(account.customer);",
+                      "    pm.expect(account.customer.id).to.eql(account.customerId);",
+                      "}",
+                      "pm.test('Account remains readable and preserves its identity', () => {",
+                      "    const account = pm.response.json();",
+                      "    checkAccount(account);",
+                      "    pm.expect(account.id).to.eql(pm.collectionVariables.get('existingAccountId'));",
+                      "});",
+                      "pm.test('Customer data matches the selected resilience mode', () => {",
+                      "    const mode = pm.environment.get('resilienceMode') || 'healthy';",
+                      "    pm.expect(['healthy', 'outage', 'recovery']).to.include(mode);",
+                      "    const customer = pm.response.json().customer;",
+                      "    ['firstName', 'lastName', 'email'].forEach(field => {",
+                      "        if (mode === 'outage') pm.expect(customer[field]).to.eql('Not available');",
+                      "        else pm.expect(customer[field]).not.to.eql('Not available');",
+                      "    });",
+                      "});"
+                    ]
+                  }
+                }
+              ],
+              "response": []
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "variable": [
+    {
+      "key": "testCustomerId",
+      "value": ""
+    },
+    {
+      "key": "testEmail",
+      "value": ""
+    },
+    {
+      "key": "existingAccountId",
+      "value": ""
+    },
+    {
+      "key": "accountCustomerId",
+      "value": ""
+    },
+    {
+      "key": "createdAccountId",
+      "value": ""
+    }
+  ]
+}
