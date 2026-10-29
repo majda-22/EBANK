@@ -44,7 +44,7 @@ public class BankAccountServiceImpl implements BankAccountService {
     @Override
     @Transactional
     public BankAccountDTO create(CreateBankAccountRequest request) {
-        var customer = customers.findCustomerById(request.getCustomerId());
+        var customer = customers.requireExistingCustomer(request.getCustomerId());
         var account = mapper.toEntity(request);
         account.setCustomer(customer);
         return mapper.toDTO(repository.save(account));

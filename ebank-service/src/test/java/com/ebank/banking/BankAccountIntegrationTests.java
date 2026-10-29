@@ -4,13 +4,16 @@ import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
+import java.time.Duration;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicBoolean;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -18,16 +21,21 @@ import org.springframework.boot.test.web.client.TestRestTemplate;
 import org.springframework.http.HttpStatus;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.TestPropertySource;
+import io.github.resilience4j.circuitbreaker.CircuitBreaker;
+import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.awaitility.Awaitility.await;
 
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = {
         "spring.config.import=", "spring.cloud.config.enabled=false", "eureka.client.enabled=false",
         "spring.datasource.url=jdbc:h2:mem:ebank-tests;DB_CLOSE_DELAY=-1",
-        "spring.jpa.hibernate.ddl-auto=create-drop", "spring.jpa.open-in-view=false",
-        "resilience4j.circuitbreaker.instances.customer-service.minimum-number-of-calls=100"
+        "spring.jpa.hibernate.ddl-auto=create-drop", "spring.jpa.open-in-view=false"
 })
+@TestPropertySource(locations = "file:../config-repo/ebank-service.properties")
 class BankAccountIntegrationTests {
+    private static final String FIND_CIRCUIT = "CustomerRestClientfindCustomerByIdLong";
     private static HttpServer customerServer;
     private static final AtomicBoolean available = new AtomicBoolean(true);
     private static final String CUSTOMER_ONE = """
@@ -38,10 +46,18 @@ class BankAccountIntegrationTests {
             """;
 
     private final TestRestTemplate rest;
+    private final CircuitBreakerRegistry circuitBreakers;
 
     @Autowired
-    BankAccountIntegrationTests(TestRestTemplate rest) {
+    BankAccountIntegrationTests(TestRestTemplate rest, CircuitBreakerRegistry circuitBreakers) {
         this.rest = rest;
+        this.circuitBreakers = circuitBreakers;
+    }
+
+    @BeforeEach
+    void resetCircuits() {
+        available.set(true);
+        circuitBreakers.getAllCircuitBreakers().forEach(CircuitBreaker::reset);
     }
 
     @DynamicPropertySource
@@ -145,9 +161,61 @@ class BankAccountIntegrationTests {
                 .isEqualTo(HttpStatus.BAD_REQUEST);
         available.set(false);
         var outage = rest.getForEntity("/api/accounts", JsonNode.class);
-        assertThat(outage.getStatusCode()).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE);
-        assertThat(outage.getBody().path("message").asText()).contains("temporarily unavailable");
-        assertThat(outage.getBody().has("trace")).isFalse();
+        assertThat(outage.getStatusCode()).isEqualTo(HttpStatus.OK);
+        outage.getBody().forEach(account -> {
+            assertThat(account.path("customer").path("firstName").asText()).isEqualTo("Not available");
+            assertThat(account.path("customer").path("id").asLong()).isEqualTo(account.path("customerId").asLong());
+        });
+    }
+
+    @Test
+    void feignFallbackOpensCircuitThenRecoversThroughHalfOpenAndExposesEvents() {
+        var accounts = rest.getForObject("/api/accounts", JsonNode.class);
+        var id = accounts.get(0).path("id").asText();
+        var customerId = accounts.get(0).path("customerId").asLong();
+        var breaker = circuitBreakers.circuitBreaker(FIND_CIRCUIT);
+        breaker.reset();
+        var config = breaker.getCircuitBreakerConfig();
+        assertThat(config.getSlidingWindowSize()).isEqualTo(5);
+        assertThat(config.getMinimumNumberOfCalls()).isEqualTo(5);
+        assertThat(config.getFailureRateThreshold()).isEqualTo(50.0f);
+        assertThat(config.getPermittedNumberOfCallsInHalfOpenState()).isEqualTo(2);
+        assertThat(config.isAutomaticTransitionFromOpenToHalfOpenEnabled()).isTrue();
+        var transitions = new CopyOnWriteArrayList<CircuitBreaker.StateTransition>();
+        breaker.getEventPublisher().onStateTransition(event -> transitions.add(event.getStateTransition()));
+
+        available.set(false);
+        for (int call = 0; call < 5; call++) {
+            var response = rest.getForEntity("/api/accounts/" + id, JsonNode.class);
+            assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+            var customer = response.getBody().path("customer");
+            assertThat(customer.path("id").asLong()).isEqualTo(customerId);
+            for (var field : new String[]{"firstName", "lastName", "email"}) {
+                assertThat(customer.path(field).asText()).isEqualTo("Not available");
+            }
+        }
+        assertThat(breaker.getState()).isEqualTo(CircuitBreaker.State.OPEN);
+        assertThat(rest.getForObject("/api/accounts/" + id, JsonNode.class)
+                .path("customer").path("firstName").asText()).isEqualTo("Not available");
+        await().atMost(Duration.ofSeconds(13)).pollInterval(Duration.ofMillis(100))
+                .untilAsserted(() -> assertThat(breaker.getState()).isEqualTo(CircuitBreaker.State.HALF_OPEN));
+
+        available.set(true);
+        var firstProbe = rest.getForObject("/api/accounts/" + id, JsonNode.class);
+        assertThat(firstProbe.path("customer").path("firstName").asText()).isNotEqualTo("Not available");
+        assertThat(breaker.getState()).isEqualTo(CircuitBreaker.State.HALF_OPEN);
+        rest.getForObject("/api/accounts/" + id, JsonNode.class);
+        assertThat(breaker.getState()).isEqualTo(CircuitBreaker.State.CLOSED);
+        assertThat(transitions).containsSubsequence(CircuitBreaker.StateTransition.CLOSED_TO_OPEN,
+                CircuitBreaker.StateTransition.OPEN_TO_HALF_OPEN, CircuitBreaker.StateTransition.HALF_OPEN_TO_CLOSED);
+
+        var names = rest.getForEntity("/actuator/circuitbreakers", JsonNode.class);
+        assertThat(names.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(names.getBody().toString()).contains(FIND_CIRCUIT, "CustomerRestClientallCustomers");
+        var events = rest.getForEntity("/actuator/circuitbreakerevents", JsonNode.class);
+        assertThat(events.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(events.getBody().toString()).contains(FIND_CIRCUIT, "STATE_TRANSITION");
+        assertThat(circuitBreakers.getAllCircuitBreakers()).noneMatch(cb -> cb.getName().equals("customer-service"));
     }
 
     @Test
