@@ -41,3 +41,7 @@ At startup, the CommandLineRunner retrieves the customer list through Feign and 
 - H2: <http://localhost:8082/h2-console> (JDBC URL `jdbc:h2:mem:ebank`, user `sa`, empty password)
 
 The integration tests use an isolated H2 database and an HTTP customer stub with real Feign serialization. They cover seeding, enrichment, UUIDs, timestamps, account creation, missing customers/accounts, validation, fallback reads, OPEN → HALF_OPEN → CLOSED recovery, Actuator events, Swagger, and startup without customer-service. Runtime validation separately checks the live Eureka and Config Server integrations.
+
+## MCP tools
+
+Spring AI 1.1.8 exposes `getAllAccounts`, `getAccountById`, `getAccountsByCustomer`, and `createAccount` at **http://localhost:8082/mcp** using Streamable HTTP. `BankAccountTools` delegates to the existing services and returns enriched DTOs. `BankAccountMcpConfiguration` registers a `MethodToolCallbackProvider` and logs the registered names. Config Server supplies protocol, identity, and endpoint properties. The integration suite verifies initialization, exact tool discovery, all four calls, validation, and unknown-ID errors with the SDK's Streamable HTTP client. See [docs/mcp.md](../docs/mcp.md).

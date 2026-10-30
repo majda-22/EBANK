@@ -58,7 +58,7 @@ Empty module and documentation directories contain `.gitkeep` placeholders so Gi
 - Spring Boot: **3.5.16**; shared baseline for all backend modules.
 - Spring Cloud: **2025.0.3**. The [official compatibility table](https://spring.io/projects/spring-cloud/) maps 2025.0.x to Boot 3.5.x.
 - Gateway: **4.3.5**, managed by the Cloud BOM. The reactive starter uses `spring.cloud.gateway.server.webflux.*` properties, as documented in the [Cloud release notes](https://github.com/spring-cloud/spring-cloud-release/wiki/Spring-Cloud-2025.0-Release-Notes).
-- Spring AI: **1.1.8**, reserved for the chatbot module. The [official Spring AI compatibility guide](https://github.com/spring-projects/spring-ai#readme) maps AI 1.1.x to Boot 3.5.x.
+- Spring AI: **1.1.8**, used by the customer and banking MCP servers and reserved for the future chatbot client. The [official Spring AI compatibility guide](https://github.com/spring-projects/spring-ai#readme) maps AI 1.1.x to Boot 3.5.x.
 - springdoc: **2.10.0** for customer-service and ebank-service. The [official compatibility matrix](https://springdoc.org/v2/) supports it with Boot 3.5.x.
 - Angular: to be selected when the frontend is implemented.
 
@@ -141,6 +141,8 @@ All 21 requests go through the gateway. Customer tests create, read, update, val
 The **resilience** folder is green by default with real customer data. For a deliberate outage, first complete a healthy run, then follow its folder instructions: stop customer-service, set `resilienceMode=outage`, run **Open circuit (five probes)**, allow 10 seconds, restart customer-service and wait for discovery, set `resilienceMode=recovery`, and run **Recovery (two probes)**. Reset the mode to `healthy` before another complete run. State/event observation uses the direct banking Actuator endpoints described in [docs/resilience-test.md](docs/resilience-test.md); every request saved in this collection still uses the gateway. Newman cannot stop and restart local Java processes automatically.
 
 ## Development and validation
+
+Customer and banking services also expose Streamable HTTP MCP servers directly at <http://localhost:8081/mcp> and <http://localhost:8082/mcp>. Their callback-provider beans register three customer tools and four account tools that reuse the existing services and return DTOs. Server identity, protocol, and endpoint properties live in the separate config repository. See [docs/mcp.md](docs/mcp.md) for the tool catalog, compatibility evidence, session setup, and tests. MCP is not routed through the gateway.
 
 Backend services will use entity, repository, DTO, mapper, service, and REST controller layers, Lombok, and constructor injection.
 

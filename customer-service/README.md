@@ -51,3 +51,7 @@ Missing customers return HTTP 404 with JSON such as:
 Validation failures return HTTP 400 with the same structure and per-field messages in `fieldErrors`. Malformed JSON and invalid ID types return clean HTTP 400 responses.
 
 The integration suite uses an isolated H2 database without Config Server or Eureka and covers seed data, CRUD, server-generated IDs, missing records, validation, malformed input, Swagger UI, and OpenAPI operations. Runtime checks verify remote configuration and Eureka registration separately.
+
+## MCP tools
+
+Spring AI 1.1.8 exposes `getAllCustomers`, `getCustomerById`, and `createCustomer` at **http://localhost:8081/mcp** using Streamable HTTP. `CustomerTools` delegates to `CustomerService`, and `CustomerMcpConfiguration` registers a `MethodToolCallbackProvider` and logs the tool names. Protocol, server identity, and endpoint are supplied by Config Server. The integration suite also exercises real MCP initialization, discovery, calls, DTO validation, and missing-ID errors. See [docs/mcp.md](../docs/mcp.md) for compatibility evidence and HTTP examples.

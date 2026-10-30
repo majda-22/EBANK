@@ -2,6 +2,11 @@ package com.ebank.customer;
 
 import java.util.Map;
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import io.modelcontextprotocol.client.McpClient;
+import io.modelcontextprotocol.client.McpSyncClient;
+import io.modelcontextprotocol.client.transport.HttpClientStreamableHttpTransport;
+import io.modelcontextprotocol.spec.McpSchema;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -11,6 +16,7 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
+import org.springframework.test.context.TestPropertySource;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -19,6 +25,7 @@ import static org.assertj.core.api.Assertions.assertThat;
         "spring.datasource.url=jdbc:h2:mem:customer-tests;DB_CLOSE_DELAY=-1",
         "spring.jpa.hibernate.ddl-auto=create-drop", "spring.jpa.open-in-view=false"
 })
+@TestPropertySource(locations = "file:../config-repo/customer-service.properties")
 class CustomerServiceApplicationTests {
 
     private final TestRestTemplate rest;
@@ -26,6 +33,43 @@ class CustomerServiceApplicationTests {
     @Autowired
     CustomerServiceApplicationTests(TestRestTemplate rest) {
         this.rest = rest;
+    }
+
+    @Test
+    void exposesCustomerToolsOverStreamableHttpWithValidationAndClearErrors() throws Exception {
+        var transport = HttpClientStreamableHttpTransport.builder(rest.getRootUri()).endpoint("/mcp").build();
+        try (var client = McpClient.sync(transport).build()) {
+            assertThat(client.initialize().serverInfo().name()).isEqualTo("customer-service");
+            var tools = client.listTools().tools();
+            assertThat(tools).extracting(McpSchema.Tool::name)
+                    .containsExactlyInAnyOrder("getAllCustomers", "getCustomerById", "createCustomer");
+            tools.forEach(tool -> assertThat(tool.description()).isNotBlank());
+            assertThat(readTool(client, "getAllCustomers", Map.of()).isArray()).isTrue();
+            var created = readTool(client, "createCustomer", Map.of("firstName", "Mcp",
+                    "lastName", "Test", "email", "mcp.customer@example.com"));
+            var id = created.path("id").asLong();
+            assertThat(id).isPositive();
+            try {
+                var found = readTool(client, "getCustomerById", Map.of("customerId", id));
+                assertThat(found.path("email").asText()).isEqualTo("mcp.customer@example.com");
+            } finally {
+                rest.delete("/api/customers/" + id);
+            }
+            var missing = client.callTool(new McpSchema.CallToolRequest("getCustomerById", Map.of("customerId", id)));
+            assertThat(missing.isError()).isTrue();
+            assertThat(missing.content().toString()).contains("Customer with id " + id + " was not found");
+            var invalid = client.callTool(new McpSchema.CallToolRequest("createCustomer", Map.of(
+                    "firstName", "Mcp", "lastName", "Test", "email", "invalid")));
+            assertThat(invalid.isError()).isTrue();
+            assertThat(invalid.content().toString()).contains("Invalid customer", "email");
+        }
+    }
+
+    private JsonNode readTool(McpSyncClient client, String name, Map<String, Object> arguments) throws Exception {
+        var result = client.callTool(new McpSchema.CallToolRequest(name, arguments));
+        assertThat(result.isError()).isNotEqualTo(true);
+        var text = (McpSchema.TextContent) result.content().getFirst();
+        return new ObjectMapper().readTree(text.text());
     }
 
     @Test

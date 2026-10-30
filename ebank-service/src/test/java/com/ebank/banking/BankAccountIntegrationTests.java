@@ -10,6 +10,11 @@ import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicBoolean;
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import io.modelcontextprotocol.client.McpClient;
+import io.modelcontextprotocol.client.McpSyncClient;
+import io.modelcontextprotocol.client.transport.HttpClientStreamableHttpTransport;
+import io.modelcontextprotocol.spec.McpSchema;
 import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
@@ -52,6 +57,48 @@ class BankAccountIntegrationTests {
     BankAccountIntegrationTests(TestRestTemplate rest, CircuitBreakerRegistry circuitBreakers) {
         this.rest = rest;
         this.circuitBreakers = circuitBreakers;
+    }
+
+    @Test
+    void exposesBankingToolsOverStreamableHttpWithCustomerEnrichmentAndClearErrors() throws Exception {
+        var transport = HttpClientStreamableHttpTransport.builder(rest.getRootUri()).endpoint("/mcp").build();
+        try (var client = McpClient.sync(transport).build()) {
+            assertThat(client.initialize().serverInfo().name()).isEqualTo("ebank-service");
+            var tools = client.listTools().tools();
+            assertThat(tools).extracting(McpSchema.Tool::name).containsExactlyInAnyOrder(
+                    "getAllAccounts", "getAccountById", "getAccountsByCustomer", "createAccount");
+            tools.forEach(tool -> assertThat(tool.description()).isNotBlank());
+            var accounts = readTool(client, "getAllAccounts", Map.of());
+            assertThat(accounts.isArray()).isTrue();
+            assertThat(accounts.size()).isGreaterThanOrEqualTo(4);
+            var id = accounts.get(0).path("id").asText();
+            var customerId = accounts.get(0).path("customerId").asLong();
+            var account = readTool(client, "getAccountById", Map.of("accountId", id));
+            assertThat(account.path("customer").path("id").asLong()).isEqualTo(customerId);
+            assertThat(readTool(client, "getAccountsByCustomer", Map.of("customerId", customerId)).size())
+                    .isGreaterThanOrEqualTo(2);
+            var created = readTool(client, "createAccount", Map.of("balance", 42.5,
+                    "type", "SAVING_ACCOUNT", "customerId", customerId));
+            assertThat(created.path("balance").asDouble()).isEqualTo(42.5);
+            assertThat(created.path("customer").path("id").asLong()).isEqualTo(customerId);
+            var missingId = UUID.randomUUID().toString();
+            var missing = client.callTool(new McpSchema.CallToolRequest("getAccountById", Map.of("accountId", missingId)));
+            assertThat(missing.isError()).isTrue();
+            assertThat(missing.content().toString()).contains("Bank account with id " + missingId + " was not found");
+            var unknownCustomer = client.callTool(new McpSchema.CallToolRequest("getAccountsByCustomer", Map.of("customerId", 999)));
+            assertThat(unknownCustomer.isError()).isTrue();
+            assertThat(unknownCustomer.content().toString()).contains("Customer with id 999 was not found");
+            var invalid = client.callTool(new McpSchema.CallToolRequest("createAccount", Map.of(
+                    "balance", -1, "type", "CURRENT_ACCOUNT", "customerId", customerId)));
+            assertThat(invalid.isError()).isTrue();
+            assertThat(invalid.content().toString()).contains("Invalid account", "balance");
+        }
+    }
+
+    private JsonNode readTool(McpSyncClient client, String name, Map<String, Object> arguments) throws Exception {
+        var result = client.callTool(new McpSchema.CallToolRequest(name, arguments));
+        assertThat(result.isError()).isNotEqualTo(true);
+        return new ObjectMapper().readTree(((McpSchema.TextContent) result.content().getFirst()).text());
     }
 
     @BeforeEach
